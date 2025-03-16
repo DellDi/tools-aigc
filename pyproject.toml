@@ -1,0 +1,61 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "tools-aigc"
+version = "0.2.1"
+description = "通用OpenAI兼容模型的function call工具集合调用服务"
+readme = "README.md"
+requires-python = ">=3.13"
+license = { file = "LICENSE" }
+authors = [
+    { name = "delldi", email = "875372314@qq.com" }
+]
+dependencies = [
+    "fastapi>=0.115.11",
+    "uvicorn>=0.34.0",
+    "pydantic>=2.4.2",
+    "python-dotenv>=1.0.0",
+    "httpx>=0.28.1",
+    "openai>=1.66.3",
+    "python-multipart>=0.0.6",
+    "sqlalchemy>=2.0.39",
+    "asyncpg>=0.27.0",
+    "alembic>=1.11.0",
+    "python-jose>=3.3.0",
+    "passlib>=1.7.4",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.4.0",
+    "black>=23.9.1",
+    "isort>=5.12.0",
+    "mypy>=1.5.1",
+    "ruff>=0.0.290",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["app"]
+
+[tool.black]
+line-length = 88
+target-version = ["py310"]
+
+[tool.isort]
+profile = "black"
+line_length = 88
+
+[tool.mypy]
+python_version = "3.10"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+
+[tool.ruff]
+line-length = 88
+target-version = "py310"
+select = ["E", "F", "B", "I"]
+ignore = []
