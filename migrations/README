@@ -1,0 +1,41 @@
+# 数据库迁移
+
+本目录包含使用Alembic管理的数据库迁移脚本。
+
+## 常用命令
+
+### 创建新的迁移
+
+```bash
+alembic revision --autogenerate -m "描述迁移的内容"
+```
+
+### 应用所有迁移
+
+```bash
+alembic upgrade head
+```
+
+### 回滚最后一次迁移
+
+```bash
+alembic downgrade -1
+```
+
+### 查看当前迁移状态
+
+```bash
+alembic current
+```
+
+### 查看迁移历史
+
+```bash
+alembic history
+```
+
+## 注意事项
+
+- 在应用迁移前，请确保已经正确配置了数据库连接
+- 自动生成的迁移脚本可能需要手动调整
+- 在生产环境中应用迁移前，请先在测试环境中验证
