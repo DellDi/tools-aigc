@@ -61,9 +61,9 @@ tools-aigc/
 
 ### 环境要求
 
-- Python 3.10+
+- Python 3.13+
 - PostgreSQL 12+
-- 依赖项见requirements.txt
+- uv 包管理器 (推荐)
 
 ### 安装步骤
 
@@ -74,19 +74,29 @@ git clone https://github.com/yourusername/tools-aigc.git
 cd tools-aigc
 ```
 
-2. 创建虚拟环境
+2. 安装 uv 包管理器 (如果尚未安装)
 
 ```bash
-python -m venv venv
-source venv/bin/activate  # Linux/Mac
-# 或
-venv\Scripts\activate  # Windows
+# 使用官方安装脚本
+curl -sSf https://install.ultraviolet.rs | sh
+
+# 或使用 pip 安装
+pip install uv
 ```
 
-3. 安装依赖
+3. 创建虚拟环境并安装依赖
 
 ```bash
-pip install -r requirements.txt
+# 创建虚拟环境并安装依赖 (二合一命令)
+uv venv .venv
+uv pip install -e .
+
+# 或者分步执行
+uv venv .venv
+source .venv/bin/activate  # Linux/Mac
+# 或
+.venv\Scripts\activate  # Windows
+uv pip install -e .
 ```
 
 4. 配置环境变量
@@ -106,6 +116,7 @@ createdb tools_aigc
 6. 应用数据库迁移
 
 ```bash
+uv pip install alembic
 alembic upgrade head
 ```
 
@@ -116,6 +127,24 @@ uvicorn main:app --reload
 ```
 
 应用将在 http://localhost:8000 运行，API文档可在 http://localhost:8000/api/docs 访问。
+
+### 依赖管理
+
+使用 uv 管理项目依赖：
+
+```bash
+# 安装新依赖
+uv pip install package_name
+
+# 更新依赖
+uv pip install --upgrade package_name
+
+# 从 pyproject.toml 生成 requirements.txt
+uv pip export -o requirements.txt
+
+# 查看已安装的依赖
+uv pip list
+```
 
 ## API接口
 
