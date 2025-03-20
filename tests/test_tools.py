@@ -9,6 +9,10 @@ from fastapi.testclient import TestClient
 from app.tools import load_tools
 from main import app
 
+# 载入环境变量
+from dotenv import load_dotenv
+
+load_dotenv()
 
 # 初始化测试客户端
 @pytest.fixture

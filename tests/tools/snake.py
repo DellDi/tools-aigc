@@ -3,11 +3,16 @@ import requests
 import random
 import time
 import json
+# 载入环境变量
+from dotenv import load_dotenv
 
+load_dotenv()
+
+QWEN_API_KEY = os.getenv('QWEN_API_KEY')
 
 def ask_gpt(msg, system=''''''):
 	headers = {
-		'Authorization': f'Bearer sk-72170c68b44040ee806830adba2888e7',
+		'Authorization': f'Bearer {QWEN_API_KEY}',
 		'Content-Type': 'application/json',
 		'X-DashScope-SSE': 'enable',
 	}
@@ -52,7 +57,6 @@ def ask_gpt(msg, system=''''''):
 			return tmp
 		except:
 			continue
-
 
 
 import pygame
