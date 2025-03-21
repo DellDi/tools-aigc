@@ -38,6 +38,9 @@ class Settings(BaseSettings):
 
     # 工具配置
     TOOLS_TIMEOUT: int = 30  # 工具调用超时时间（秒）
+    
+    # 通义API配置
+    QWEN_API_KEY: Optional[str] = None
 
     # 其他模型API配置
     # 例如：Azure OpenAI
