@@ -8,7 +8,7 @@ from enum import Enum
 from typing import Any, Dict, List, Optional
 
 from sqlalchemy import Boolean, Column, DateTime, Enum as SQLAEnum, String, Text
-from sqlalchemy.dialects.postgresql import ARRAY, UUID
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID
 
 from app.db.base import Base, TimestampMixin, UUIDMixin
 
@@ -48,6 +48,9 @@ class User(Base, UUIDMixin, TimestampMixin):
     # 其他信息
     last_login = Column(DateTime(timezone=True), nullable=True, comment="最后登录时间")
     description = Column(Text, nullable=True, comment="描述")
+    
+    # 自定义额外数据
+    extra_data = Column(JSONB, nullable=True, default={}, comment="自定义额外数据")
 
     def __repr__(self) -> str:
         return f"<User {self.username}>"

@@ -30,7 +30,25 @@ class ApiLogMiddleware:
         """
         self.app = app
 
-    async def __call__(self, request: Request, call_next: Callable) -> Response:
+    async def __call__(self, scope: Dict[str, Any], receive: Callable, send: Callable) -> None:
+        """
+        ASGI 中间件调用接口
+
+        Args:
+            scope: ASGI 请求作用域
+            receive: ASGI 接收函数
+            send: ASGI 发送函数
+        """
+        if scope["type"] != "http":
+            # 非HTTP请求（如WebSocket）直接传递
+            await self.app(scope, receive, send)
+            return
+            
+        # 创建请求对象
+        request = Request(scope, receive=receive)
+        
+        # 记录请求开始时间
+        start_time = time.time()
         """
         中间件调用
 
@@ -108,37 +126,48 @@ class ApiLogMiddleware:
         except Exception as e:
             logger.warning(f"无法提取用户ID: {str(e)}")
 
+        # 创建自定义发送函数来捕获响应
+        response_body = []
+        send_complete = False
+        response_status = 200
+        response_headers = []
+        
+        async def send_wrapper(message):
+            nonlocal send_complete, response_status, response_headers
+            
+            if message["type"] == "http.response.start":
+                response_status = message["status"]
+                response_headers = message["headers"]
+                await send(message)
+            elif message["type"] == "http.response.body":
+                if message.get("body"):
+                    response_body.append(message.get("body", b""))
+                if not message.get("more_body", False):
+                    send_complete = True
+                await send(message)
+            else:
+                await send(message)
+        
         # 调用下一个中间件或路由处理函数
         try:
-            response = await call_next(request)
+            await self.app(scope, receive, send_wrapper)
 
             # 记录响应信息
-            log_entry["status_code"] = response.status_code
-
-            # 尝试提取响应体
-            try:
-                # 读取响应体
-                response_body = b""
-                async for chunk in response.body_iterator:
-                    response_body += chunk
-
-                # 重新设置响应体
-                response = Response(
-                    content=response_body,
-                    status_code=response.status_code,
-                    headers=dict(response.headers),
-                    media_type=response.media_type,
-                )
-
+            log_entry["status_code"] = response_status
+            
+            # 尝试解析响应体
+            if response_body:
+                full_response_body = b"".join(response_body)
+                
                 # 尝试解析为JSON
                 try:
-                    body_json = json.loads(response_body)
+                    body_json = json.loads(full_response_body)
                     log_entry["response_body"] = body_json
                 except json.JSONDecodeError:
                     # 如果不是JSON，则存储原始内容的长度
-                    log_entry["response_body"] = {"_raw_length": len(response_body)}
-            except Exception as e:
-                logger.warning(f"无法提取响应体: {str(e)}")
+                    log_entry["response_body"] = {"_raw_length": len(full_response_body)}
+            else:
+                log_entry["response_body"] = {"_raw_length": 0}
 
         except Exception as e:
             # 记录错误信息
@@ -156,7 +185,7 @@ class ApiLogMiddleware:
             except Exception as e:
                 logger.exception(f"保存API日志出错: {str(e)}")
 
-        return response
+        # 中间件不返回响应，因为我们已经通过 send 函数发送了响应
 
     async def _save_log(self, log_data: Dict[str, Any]) -> None:
         """
@@ -185,4 +214,8 @@ class ApiLogMiddleware:
         # 保存到数据库
         async with async_session_factory() as session:
             session.add(api_log)
-            await session.commit()
+            try:
+                await session.commit()
+            except Exception as e:
+                await session.rollback()
+                logger.exception(f"保存API日志到数据库失败: {str(e)}")

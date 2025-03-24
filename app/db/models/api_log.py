@@ -2,11 +2,7 @@
 API日志模型
 """
 
-import uuid
-from datetime import datetime
-from typing import Any, Dict, Optional
-
-from sqlalchemy import Column, DateTime, Integer, String, Text
+from sqlalchemy import Column, Integer, String, Text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 
 from app.db.base import Base, TimestampMixin, UUIDMixin

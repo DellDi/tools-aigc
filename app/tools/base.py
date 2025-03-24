@@ -4,10 +4,9 @@
 
 import asyncio
 import inspect
-import json
 import logging
 from abc import ABC, abstractmethod
-from typing import Any, Callable, Dict, List, Optional, Type, Union, get_type_hints
+from typing import Any, Dict, List, Optional, Type, get_type_hints
 
 from pydantic import BaseModel, Field, create_model
 
@@ -58,7 +57,9 @@ class BaseTool(ABC):
 
             # 获取参数类型和默认值
             param_type = type_hints.get(name, Any)
-            default_value = ... if param.default is inspect.Parameter.empty else param.default
+            default_value = (
+                ... if param.default is inspect.Parameter.empty else param.default
+            )
 
             # 获取参数描述（如果有）
             description = None
@@ -71,10 +72,7 @@ class BaseTool(ABC):
 
         # 创建参数模式
         model_name = f"{self.__class__.__name__}Parameters"
-        self.parameters_schema = create_model(
-            model_name,
-            **parameters
-        )
+        self.parameters_schema = create_model(model_name, **parameters)
 
     def to_openai_function(self) -> Dict[str, Any]:
         """转换为OpenAI function格式"""
@@ -84,12 +82,8 @@ class BaseTool(ABC):
                 "function": {
                     "name": self.name,
                     "description": self.description,
-                    "parameters": {
-                        "type": "object",
-                        "properties": {},
-                        "required": []
-                    }
-                }
+                    "parameters": {"type": "object", "properties": {}, "required": []},
+                },
             }
 
         # 获取参数模式的JSON模式
@@ -101,8 +95,8 @@ class BaseTool(ABC):
             "function": {
                 "name": self.name,
                 "description": self.description,
-                "parameters": schema
-            }
+                "parameters": schema,
+            },
         }
 
     @abstractmethod
@@ -115,22 +109,17 @@ class BaseTool(ABC):
         try:
             # 使用超时机制运行工具
             result = await asyncio.wait_for(
-                self.execute(**kwargs),
-                timeout=settings.TOOLS_TIMEOUT
+                self.execute(**kwargs), timeout=settings.TOOLS_TIMEOUT
             )
             return result
         except asyncio.TimeoutError:
             logger.error(f"工具 {self.name} 执行超时")
             return ToolResult(
-                success=False,
-                error=f"工具执行超时（{settings.TOOLS_TIMEOUT}秒）"
+                success=False, error=f"工具执行超时（{settings.TOOLS_TIMEOUT}秒）"
             )
         except Exception as e:
             logger.exception(f"工具 {self.name} 执行出错: {str(e)}")
-            return ToolResult(
-                success=False,
-                error=f"工具执行出错: {str(e)}"
-            )
+            return ToolResult(success=False, error=f"工具执行出错: {str(e)}")
 
 
 class ToolRegistry:

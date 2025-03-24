@@ -2,8 +2,7 @@
 配置管理模块
 """
 
-import os
-from typing import Any, Dict, List, Optional, Union
+from typing import List, Optional, Union
 
 from pydantic import AnyHttpUrl, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -31,22 +30,14 @@ class Settings(BaseSettings):
             return v
         raise ValueError(v)
 
-    # OpenAI API配置
-    OPENAI_API_KEY: str = Field(..., description="OpenAI API密钥")
-    OPENAI_API_BASE: str = "https://api.openai.com/v1"
-    OPENAI_API_VERSION: str = "2023-05-15"
-
     # 工具配置
     TOOLS_TIMEOUT: int = 30  # 工具调用超时时间（秒）
     
     # 通义API配置
     QWEN_API_KEY: Optional[str] = None
-
-    # 其他模型API配置
-    # 例如：Azure OpenAI
-    AZURE_OPENAI_API_KEY: Optional[str] = None
-    AZURE_OPENAI_API_BASE: Optional[str] = None
-    AZURE_OPENAI_API_VERSION: Optional[str] = None
+    
+    # OpenWeatherMap API配置
+    OPENWEATHERMAP_API_KEY: Optional[str] = None
 
     # 数据库配置
     DATABASE_URL: str = Field(..., description="数据库连接URL")

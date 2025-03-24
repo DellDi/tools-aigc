@@ -4,9 +4,8 @@
 
 import uuid
 from datetime import datetime
-from typing import Any, Dict, Optional
 
-from sqlalchemy import Column, DateTime, String, func
+from sqlalchemy import DateTime, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.ext.declarative import declared_attr
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
@@ -51,7 +50,5 @@ class UUIDMixin:
     )
 
 
-# 导入所有模型，确保它们在Base.metadata中注册
-# 这里导入所有模型模块
-from app.db.models.api_log import ApiLog  # noqa
-from app.db.models.user import User  # noqa
+# 注意：不要在这里导入模型，避免循环导入
+# 模型导入已移至 app/db/models/__init__.py

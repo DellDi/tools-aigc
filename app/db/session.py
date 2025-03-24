@@ -6,7 +6,6 @@ import logging
 from typing import AsyncGenerator
 
 from sqlalchemy.ext.asyncio import (
-    AsyncEngine,
     AsyncSession,
     async_sessionmaker,
     create_async_engine,
@@ -70,4 +69,4 @@ async def init_db() -> None:
         logger.info("数据库初始化完成")
     except Exception as e:
         logger.exception(f"数据库初始化失败: {str(e)}")
-        raise
+        # raise

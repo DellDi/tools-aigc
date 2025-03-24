@@ -2,7 +2,6 @@
 HTTP请求工具
 """
 
-import json
 import logging
 from typing import Any, Dict, List, Optional, Union
 

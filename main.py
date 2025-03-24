@@ -70,25 +70,25 @@ if settings.BACKEND_CORS_ORIGINS:
 # 添加API日志中间件
 app.add_middleware(ApiLogMiddleware)
 
-# 添加认证中间件
-app.add_middleware(
-    AuthMiddleware,
-    exclude_paths=[
-        "/",
-        "/api/health",
-        "/api/auth/login",
-        "/api/auth/register",
-        "/api/docs",
-        "/api/redoc",
-        "/api/openapi.json",
-    ],
-    exclude_prefixes=[
-        "/docs",
-        "/redoc",
-        "/openapi.json",
-        "/static",
-    ],
-)
+# 暂时禁用认证中间件
+# app.add_middleware(
+#     AuthMiddleware,
+#     exclude_paths=[
+#         "/",
+#         "/api/health",
+#         "/api/auth/login",
+#         "/api/auth/register",
+#         "/api/docs",
+#         "/api/redoc",
+#         "/api/openapi.json",
+#     ],
+#     exclude_prefixes=[
+#         "/docs",
+#         "/redoc",
+#         "/openapi.json",
+#         "/static",
+#     ],
+# )
 
 # 注册路由
 app.include_router(api_router, prefix="/api")

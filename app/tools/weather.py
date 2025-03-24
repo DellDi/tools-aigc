@@ -1,17 +1,15 @@
 """
 天气查询工具
 """
-
-import json
 import logging
 from typing import Optional
 
 import httpx
 
 from app.tools.base import BaseTool, ToolRegistry, ToolResult
+from app.core.config import settings
 
 logger = logging.getLogger(__name__)
-
 
 class WeatherTool(BaseTool):
     """天气查询工具"""
@@ -44,7 +42,7 @@ class WeatherTool(BaseTool):
         # 这里使用OpenWeatherMap API作为示例
         # 实际使用时需要注册并获取API密钥
         # https://openweathermap.org/api
-        api_key = "YOUR_API_KEY"  # 实际应用中应从配置中获取
+        api_key = settings.OPENWEATHERMAP_API_KEY or ""
 
         # 构建请求URL
         url = f"https://api.openweathermap.org/data/2.5/weather"
@@ -80,7 +78,6 @@ class WeatherTool(BaseTool):
                 # response = await client.get(url, params=params)
                 # response.raise_for_status()
                 # data = response.json()
-                #
                 # # 处理响应数据
                 # result = {
                 #     "city": city,
@@ -91,7 +88,6 @@ class WeatherTool(BaseTool):
                 #     "wind_speed": data["wind"]["speed"],
                 #     "units": "摄氏度" if units == "metric" else "华氏度" if units == "imperial" else "开尔文"
                 # }
-                #
                 # return ToolResult(
                 #     success=True,
                 #     data=result

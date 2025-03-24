@@ -62,7 +62,7 @@ tools-aigc/
 ### 环境要求
 
 - Python 3.13+
-- PostgreSQL 12+
+- PostgreSQL 15+
 - uv 包管理器 (推荐)
 
 ### 安装步骤
@@ -212,19 +212,91 @@ class MyTool(BaseTool):
 ToolRegistry.register(MyTool())
 ```
 
-## 数据库迁移
+## 数据库迁移与初始化
 
-使用Alembic管理数据库迁移：
+### 本地开发环境
+
+使用 uv 和 Alembic 管理数据库迁移：
 
 ```bash
+# 创建迁移版本目录（如果不存在）
+mkdir -p migrations/versions
+
 # 创建新的迁移
-alembic revision --autogenerate -m "描述迁移的内容"
+uv run -m alembic revision --autogenerate -m "描述迁移的内容"
 
 # 应用迁移
-alembic upgrade head
+uv run -m alembic upgrade head
 
 # 回滚迁移
-alembic downgrade -1
+uv run -m alembic downgrade -1
+
+# 使用初始化脚本（自动创建数据库并应用迁移）
+chmod +x scripts/init_db.sh
+./scripts/init_db.sh
+```
+
+### Docker 环境
+
+使用 Docker Compose 可以自动完成数据库的创建和迁移：
+
+```bash
+# 启动所有服务（数据库和应用）
+docker-compose up -d
+
+# 仅启动数据库
+docker-compose up -d db
+
+# 查看应用日志
+docker-compose logs -f app
+```
+
+## Docker 部署
+
+项目提供了完整的 Docker 支持，可以轻松部署到任何支持 Docker 的环境。
+
+### 构建和运行
+
+```bash
+# 构建镜像
+docker build -t tools-aigc .
+
+# 运行容器
+docker run -p 8000:8000 --env-file .env tools-aigc
+```
+
+### 使用 Docker Compose
+
+```bash
+# 启动所有服务
+docker-compose up -d
+
+# 停止所有服务
+docker-compose down
+
+# 重建并启动服务
+docker-compose up -d --build
+```
+
+### 数据库初始化流程
+
+```mermaid
+flowchart TD
+    A[修改数据模型] --> B[生成迁移文件]
+    B --> C[应用迁移]
+    
+    subgraph 初始化流程
+    D[检查数据库是否存在] -->|否| E[创建数据库]
+    E --> F[应用所有迁移]
+    D -->|是| F
+    end
+    
+    subgraph 部署流程
+    G[Docker Compose启动] --> H[PostgreSQL容器启动]
+    H --> I[应用容器启动]
+    I --> J[自动应用迁移]
+    J --> K[启动Web服务]
+    end
 ```
 
 ## 测试

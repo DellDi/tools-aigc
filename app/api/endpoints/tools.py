@@ -4,9 +4,8 @@
 
 import json
 import logging
-from typing import Any, Dict, List
 
-from fastapi import APIRouter, Depends, HTTPException, Path, Query
+from fastapi import APIRouter, HTTPException, Path
 
 from app.schemas.tools import (
     ListToolsResponse,

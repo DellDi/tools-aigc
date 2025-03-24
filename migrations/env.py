@@ -3,7 +3,6 @@ Alembic环境配置
 """
 
 import asyncio
-import os
 from logging.config import fileConfig
 
 from alembic import context
@@ -11,8 +10,13 @@ from sqlalchemy import pool
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
+# 在 run_migrations_online 函数中添加
+from sqlalchemy_utils import database_exists, create_database
+
 from app.core.config import settings
-from app.db.base import Base
+
+# 导入所有模型，确保它们被加载到元数据中
+from app.db.models import *  # noqa
 
 # 加载Alembic配置
 config = context.config
@@ -35,6 +39,7 @@ def run_migrations_offline() -> None:
     不需要实际连接数据库，只生成SQL脚本
     """
     url = config.get_main_option("sqlalchemy.url")
+    
     context.configure(
         url=url,
         target_metadata=target_metadata,
