@@ -255,11 +255,33 @@ docker-compose logs -f app
 
 项目提供了完整的 Docker 支持，可以轻松部署到任何支持 Docker 的环境。
 
+### 环境配置
+
+项目提供了开发和生产环境的两种 Docker 配置：
+
+- `Dockerfile.dev`：开发环境，使用 uv 包管理器
+- `Dockerfile.prod`：生产环境，使用标准 pip 安装
+
+环境变量配置使用统一的 `.env` 文件：
+
+```bash
+# 复制模板文件
+cp .env.example .env
+
+# 编辑自定义配置
+vim .env
+```
+
+注意：`.env.example` 文件包含了本地开发和 Docker 环境的所有配置项，并提供了注释说明。
+
 ### 构建和运行
 
 ```bash
-# 构建镜像
-docker build -t tools-aigc .
+# 使用生产环境配置构建镜像
+docker build -t tools-aigc -f Dockerfile.prod .
+
+# 使用开发环境配置构建镜像
+docker build -t tools-aigc-dev -f Dockerfile.dev .
 
 # 运行容器
 docker run -p 8000:8000 --env-file .env tools-aigc
@@ -271,11 +293,17 @@ docker run -p 8000:8000 --env-file .env tools-aigc
 # 启动所有服务
 docker-compose up -d
 
+# 切换到开发环境配置
+DOCKERFILE=Dockerfile.dev docker-compose up -d
+
 # 停止所有服务
 docker-compose down
 
 # 重建并启动服务
 docker-compose up -d --build
+
+# 查看应用日志
+docker-compose logs -f app
 ```
 
 ### 数据库初始化流程

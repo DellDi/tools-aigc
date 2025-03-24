@@ -5,41 +5,56 @@ services:
   db:
     image: postgres:15-alpine
     volumes:
-      - postgres_data:/var/lib/postgresql/data/
+      - postgres_data:${POSTGRES_DATA_PATH:-/opt/newsee/postgresql/data/}
     environment:
-      - POSTGRES_USER=postgres
-      - POSTGRES_PASSWORD=postgres
-      - POSTGRES_DB=tools_aigc
+      - POSTGRES_USER=${POSTGRES_USER:-postgres}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-postgres}
+      - POSTGRES_DB=${POSTGRES_DB:-tools_aigc}
     ports:
-      - "5432:5432"
+      - "${POSTGRES_PORT:-5432}:5432"
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres}"]
       interval: 5s
       timeout: 5s
       retries: 5
 
   # 应用服务
   app:
-    build: .
+    build:
+      context: .
+      dockerfile: ${DOCKERFILE:-Dockerfile.prod}
     restart: always
     depends_on:
       db:
         condition: service_healthy
     ports:
-      - "8000:8000"
+      - "${APP_PORT:-8000}:8000"
     environment:
-      - APP_ENV=production
-      - DATABASE_URL=postgresql+asyncpg://postgres:postgres@db:5432/tools_aigc
-      - DATABASE_POOL_SIZE=5
-      - DATABASE_MAX_OVERFLOW=10
+      # 将 DATABASE_URL 中的 localhost 替换为 db
+      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@db:${POSTGRES_PORT:-5432}/${POSTGRES_DB:-tools_aigc}
+      # 其他环境变量直接从 .env 文件中继承
+      - APP_NAME
+      - APP_ENV
+      - APP_DEBUG
+      - APP_PORT
+      - APP_HOST
+      - DATABASE_POOL_SIZE
+      - DATABASE_MAX_OVERFLOW
+      - DATABASE_ECHO
+      - JWT_SECRET_KEY
+      - JWT_ALGORITHM
+      - JWT_ACCESS_TOKEN_EXPIRE_MINUTES
+      - QWEN_API_KEY
+      - OPENWEATHERMAP_API_KEY
+      - TOOLS_TIMEOUT
     command: >
       sh -c "
         echo '等待数据库完全启动...' &&
         sleep 2 &&
         echo '运行数据库迁移...' &&
-        alembic upgrade head &&
+        ${MIGRATION_CMD:-alembic upgrade head} &&
         echo '启动应用...' &&
-        uvicorn app.main:app --host 0.0.0.0 --port 8000
+        ${APP_CMD:-uvicorn app.main:app --host ${APP_HOST:-0.0.0.0} --port ${APP_PORT:-8000}}
       "
 
 volumes:
