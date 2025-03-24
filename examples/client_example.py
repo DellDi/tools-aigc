@@ -11,8 +11,8 @@ import httpx
 
 async def list_tools(base_url: str) -> None:
     """获取所有可用工具的列表"""
-    async with httpx.AsyncClient() as client:
-        response = await client.get(f"{base_url}/api/tools/")
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        response = await client.get(f"{base_url}/api/tools")
         response.raise_for_status()
 
         tools = response.json()["tools"]
@@ -32,7 +32,7 @@ async def call_echo_tool(base_url: str) -> None:
         }
     }
 
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient(timeout=30.0) as client:
         response = await client.post(f"{base_url}/api/tools/echo", json=data)
         response.raise_for_status()
 
@@ -52,7 +52,7 @@ async def call_weather_tool(base_url: str, city: str) -> None:
         }
     }
 
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient(timeout=30.0) as client:
         response = await client.post(f"{base_url}/api/tools/weather", json=data)
         response.raise_for_status()
 
@@ -74,7 +74,7 @@ async def call_http_request_tool(base_url: str, url: str) -> None:
         }
     }
 
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient(timeout=30.0) as client:
         response = await client.post(f"{base_url}/api/tools/http_request", json=data)
         response.raise_for_status()
 
@@ -132,7 +132,7 @@ async def call_openai_compatible_api(base_url: str) -> None:
         ]
     }
 
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient(timeout=30.0) as client:
         response = await client.post(f"{base_url}/api/tools/openai/v1/chat/completions", json=data)
         response.raise_for_status()
 
@@ -172,6 +172,8 @@ async def main() -> None:
         print(f"HTTP错误: {e.response.status_code} - {e.response.text}")
     except httpx.RequestError as e:
         print(f"请求错误: {str(e)}")
+        import traceback
+        traceback.print_exc()
     except Exception as e:
         print(f"未知错误: {str(e)}")
 

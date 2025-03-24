@@ -2,6 +2,7 @@
 工具相关的API端点
 """
 
+import asyncio
 import json
 import logging
 
@@ -15,18 +16,19 @@ from app.schemas.tools import (
     ToolCallResponse,
     ToolInfo,
 )
-from app.tools import ToolRegistry, load_tools
+from app.tools import ToolRegistry
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("uvicorn")
 
 router = APIRouter()
 
 
-@router.get("/", response_model=ListToolsResponse, summary="获取所有工具")
+@router.get("", response_model=ListToolsResponse, summary="获取所有工具")
 async def list_tools():
     """
     获取所有可用工具的列表
     """
+
     tools = ToolRegistry.get_all_tools()
 
     # 转换为响应格式
@@ -62,6 +64,8 @@ async def call_tool(
     """
     调用指定的工具
     """
+    logger.info(f"调用工具 {tool_name}，参数: {request.parameters if request else None}")
+
     # 获取工具
     tool = ToolRegistry.get_tool(tool_name)
     if not tool:
@@ -80,14 +84,26 @@ async def call_tool(
 
     # 调用工具
     try:
-        result = await tool.run(**request.parameters)
+        logger.info(f"开始执行工具: {tool_name}")
+        # 设置较短的超时时间
+        result = await asyncio.wait_for(tool.execute(**request.parameters), timeout=5.0)
+        logger.info(f"工具执行完成: {tool_name}")
 
         # 构建响应
-        return ToolCallResponse(
+        response = ToolCallResponse(
             name=tool_name,
             success=result.success,
             data=result.data,
             error=result.error
+        )
+        logger.info(f"响应已构建: {tool_name}")
+        return response
+    except asyncio.TimeoutError:
+        logger.error(f"工具 {tool_name} 执行超时")
+        return ToolCallResponse(
+            name=tool_name,
+            success=False,
+            error="工具执行超时（5秒）"
         )
     except Exception as e:
         logger.exception(f"调用工具 {tool_name} 出错: {str(e)}")

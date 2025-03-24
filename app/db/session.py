@@ -22,6 +22,8 @@ async_engine = create_async_engine(
     pool_size=settings.DATABASE_POOL_SIZE,
     max_overflow=settings.DATABASE_MAX_OVERFLOW,
     pool_pre_ping=True,
+    pool_recycle=3600,  # 每小时回收连接
+    pool_timeout=5,  # 获取连接的超时时间
 )
 
 # 创建异步会话工厂

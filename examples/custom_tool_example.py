@@ -5,7 +5,7 @@
 import asyncio
 import logging
 import random
-from typing import List, Optional
+from typing import Optional
 
 from app.tools.base import BaseTool, ToolRegistry, ToolResult
 
@@ -31,10 +31,7 @@ class RandomNumberTool(BaseTool):
     _count_description = "要生成的随机数数量"
 
     async def execute(
-        self,
-        min_value: int = 1,
-        max_value: int = 100,
-        count: Optional[int] = 1
+        self, min_value: int = 1, max_value: int = 100, count: Optional[int] = 1
     ) -> ToolResult:
         """
         生成随机数
@@ -52,14 +49,11 @@ class RandomNumberTool(BaseTool):
             if min_value > max_value:
                 return ToolResult(
                     success=False,
-                    error=f"最小值 {min_value} 不能大于最大值 {max_value}"
+                    error=f"最小值 {min_value} 不能大于最大值 {max_value}",
                 )
 
             if count <= 0:
-                return ToolResult(
-                    success=False,
-                    error=f"数量 {count} 必须大于0"
-                )
+                return ToolResult(success=False, error=f"数量 {count} 必须大于0")
 
             # 生成随机数
             numbers = [random.randint(min_value, max_value) for _ in range(count)]
@@ -73,16 +67,13 @@ class RandomNumberTool(BaseTool):
                     "max": max_value,
                     "count": count,
                     "sum": sum(numbers),
-                    "average": sum(numbers) / count if count > 0 else None
-                }
+                    "average": sum(numbers) / count if count > 0 else None,
+                },
             )
 
         except Exception as e:
             logger.exception(f"生成随机数出错: {str(e)}")
-            return ToolResult(
-                success=False,
-                error=f"生成随机数出错: {str(e)}"
-            )
+            return ToolResult(success=False, error=f"生成随机数出错: {str(e)}")
 
 
 class TextAnalysisTool(BaseTool):
@@ -97,10 +88,7 @@ class TextAnalysisTool(BaseTool):
     _count_sentences_description = "是否计算句子数"
 
     async def execute(
-        self,
-        text: str,
-        count_words: bool = True,
-        count_sentences: bool = True
+        self, text: str, count_words: bool = True, count_sentences: bool = True
     ) -> ToolResult:
         """
         分析文本
@@ -138,28 +126,32 @@ class TextAnalysisTool(BaseTool):
             # 计算句子数
             if count_sentences:
                 # 简单的句子分割（以.!?结尾）
-                sentences = [s.strip() for s in text.replace("!", ".").replace("?", ".").split(".") if s.strip()]
+                sentences = [
+                    s.strip()
+                    for s in text.replace("!", ".").replace("?", ".").split(".")
+                    if s.strip()
+                ]
                 result["sentence_count"] = len(sentences)
 
                 # 句子长度分布
                 if sentences:
                     sentence_lengths = [len(s) for s in sentences]
-                    result["avg_sentence_length"] = sum(sentence_lengths) / len(sentence_lengths)
-                    result["min_sentence_length"] = min(sentence_lengths) if sentence_lengths else 0
-                    result["max_sentence_length"] = max(sentence_lengths) if sentence_lengths else 0
+                    result["avg_sentence_length"] = sum(sentence_lengths) / len(
+                        sentence_lengths
+                    )
+                    result["min_sentence_length"] = (
+                        min(sentence_lengths) if sentence_lengths else 0
+                    )
+                    result["max_sentence_length"] = (
+                        max(sentence_lengths) if sentence_lengths else 0
+                    )
 
             # 返回结果
-            return ToolResult(
-                success=True,
-                data=result
-            )
+            return ToolResult(success=True, data=result)
 
         except Exception as e:
             logger.exception(f"分析文本出错: {str(e)}")
-            return ToolResult(
-                success=False,
-                error=f"分析文本出错: {str(e)}"
-            )
+            return ToolResult(success=False, error=f"分析文本出错: {str(e)}")
 
 
 async def test_random_number_tool() -> None:

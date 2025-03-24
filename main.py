@@ -17,7 +17,6 @@ from app.api import api_router
 from app.core.config import settings
 from app.db.session import init_db
 from app.middleware.api_log import ApiLogMiddleware
-from app.middleware.auth import AuthMiddleware
 from app.tools import load_tools
 
 # 配置日志
@@ -67,7 +66,7 @@ if settings.BACKEND_CORS_ORIGINS:
         allow_headers=["*"],
     )
 
-# 添加API日志中间件
+# 添加API日志中间件（已优化，使用后台任务和超时机制）
 app.add_middleware(ApiLogMiddleware)
 
 # 暂时禁用认证中间件
@@ -107,18 +106,18 @@ def custom_openapi():
         routes=app.routes,
     )
 
-    # 添加认证组件
-    openapi_schema["components"] = openapi_schema.get("components", {})
-    openapi_schema["components"]["securitySchemes"] = {
-        "bearerAuth": {
-            "type": "http",
-            "scheme": "bearer",
-            "bearerFormat": "JWT",
-        }
-    }
+    # # 添加认证组件
+    # openapi_schema["components"] = openapi_schema.get("components", {})
+    # openapi_schema["components"]["securitySchemes"] = {
+    #     "bearerAuth": {
+    #         "type": "http",
+    #         "scheme": "bearer",
+    #         "bearerFormat": "JWT",
+    #     }
+    # }
 
-    # 添加全局安全要求
-    openapi_schema["security"] = [{"bearerAuth": []}]
+    # # 添加全局安全要求
+    # openapi_schema["security"] = [{"bearerAuth": []}]
 
     app.openapi_schema = openapi_schema
     return app.openapi_schema
@@ -127,12 +126,25 @@ def custom_openapi():
 app.openapi = custom_openapi
 
 
+# 提供 OpenAPI JSON
+@app.get("/api/openapi.json", include_in_schema=False)
+async def get_openapi_json():
+    """提供 OpenAPI JSON文件供 Swagger UI 使用"""
+    return JSONResponse(
+        content=app.openapi(),
+        headers={
+            "content-type": "application/json",
+            "Content-Disposition": "attachment; filename=\"openapi.json\"",
+        },
+    )
+
+
 # 自定义Swagger UI
 @app.get("/api/docs", include_in_schema=False)
 async def custom_swagger_ui_html():
     """自定义Swagger UI"""
     return get_swagger_ui_html(
-        openapi_url="/api/openapi.json",
+        openapi_url="/api/openapi.json",  # 使用根路径的 OpenAPI JSON
         title=f"{settings.APP_NAME} - Swagger UI",
         oauth2_redirect_url="/api/docs/oauth2-redirect",
         swagger_js_url="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5/swagger-ui-bundle.js",
@@ -157,8 +169,7 @@ async def health_check():
     健康检查端点
     """
     return JSONResponse(
-        status_code=200,
-        content={"status": "ok", "message": "服务正常运行"}
+        status_code=200, content={"status": "ok", "message": "服务正常运行"}
     )
 
 

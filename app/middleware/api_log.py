@@ -1,221 +1,252 @@
 """
-API日志中间件
+极简化 API 日志中间件 - 完全非阻塞
+支持文件和数据库双重存储
 """
 
+import asyncio
 import json
 import logging
+import os
 import time
 import uuid
-from typing import Any, Callable, Dict, Optional
+from datetime import datetime
+from typing import Any, Callable, Dict, List, Optional
 
-from fastapi import FastAPI, Request, Response
-from fastapi.routing import APIRoute
-from sqlalchemy.ext.asyncio import AsyncSession
+from fastapi import FastAPI
+from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
 
+from app.core.config import settings
 from app.db.models.api_log import ApiLog
-from app.db.session import async_session_factory
 
 logger = logging.getLogger(__name__)
 
+# 确保日志目录存在
+LOG_DIR = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "logs"
+)
+os.makedirs(LOG_DIR, exist_ok=True)
+LOG_FILE = os.path.join(LOG_DIR, "api_logs.jsonl")
 
-class ApiLogMiddleware:
-    """API日志中间件"""
+# 创建独立的异步数据库引擎，专门用于日志记录
+# 这样可以避免与主应用的数据库连接池冲突
+log_async_engine = create_async_engine(
+    settings.DATABASE_URL,
+    echo=False,
+    pool_size=3,  # 使用较小的连接池
+    max_overflow=5,
+    pool_pre_ping=True,
+    pool_recycle=3600,  # 每小时回收连接
+    pool_timeout=3,  # 获取连接的超时时间
+)
 
-    def __init__(self, app: FastAPI) -> None:
-        """
-        初始化中间件
+# 创建独立的异步会话工厂
+log_async_session_factory = async_sessionmaker(
+    bind=log_async_engine,
+    autocommit=False,
+    autoflush=False,
+    expire_on_commit=False,
+)
 
-        Args:
-            app: FastAPI应用实例
-        """
-        self.app = app
+# 全局日志队列 - 避免在中间件实例之间共享状态
+_log_queue: List[Dict[str, Any]] = []
+_is_worker_running = False
 
-    async def __call__(self, scope: Dict[str, Any], receive: Callable, send: Callable) -> None:
-        """
-        ASGI 中间件调用接口
+# 日志写入模式
+LOG_FILE_ENABLED = True    # 启用文件日志
+LOG_DB_ENABLED = True      # 启用数据库日志
+BATCH_SIZE = 50            # 批量写入数据库的日志数量
 
-        Args:
-            scope: ASGI 请求作用域
-            receive: ASGI 接收函数
-            send: ASGI 发送函数
-        """
-        if scope["type"] != "http":
-            # 非HTTP请求（如WebSocket）直接传递
-            await self.app(scope, receive, send)
-            return
-            
-        # 创建请求对象
-        request = Request(scope, receive=receive)
-        
-        # 记录请求开始时间
-        start_time = time.time()
-        """
-        中间件调用
 
-        Args:
-            request: 请求对象
-            call_next: 下一个中间件或路由处理函数
-
-        Returns:
-            Response: 响应对象
-        """
-        # 记录请求开始时间
-        start_time = time.time()
-
-        # 提取请求信息
-        method = request.method
-        path = request.url.path
-        client_ip = request.client.host if request.client else None
-
-        # 创建日志记录
-        log_entry = {
-            "id": str(uuid.uuid4()),
-            "method": method,
-            "path": path,
-            "client_ip": client_ip,
-        }
-
-        # 尝试提取查询参数
-        try:
-            query_params = dict(request.query_params)
-            log_entry["query_params"] = query_params
-        except Exception as e:
-            logger.warning(f"无法提取查询参数: {str(e)}")
-
-        # 尝试提取请求头
-        try:
-            # 过滤敏感头部
-            headers = dict(request.headers)
-            sensitive_headers = ["authorization", "cookie", "x-api-key"]
-            filtered_headers = {
-                k: v if k.lower() not in sensitive_headers else "[FILTERED]"
-                for k, v in headers.items()
-            }
-            log_entry["headers"] = filtered_headers
-            log_entry["user_agent"] = headers.get("user-agent")
-        except Exception as e:
-            logger.warning(f"无法提取请求头: {str(e)}")
-
-        # 尝试提取请求体
-        try:
-            # 读取请求体（如果有）
-            body = await request.body()
-            if body:
-                # 尝试解析为JSON
+async def _save_logs_to_db(logs: List[Dict[str, Any]]) -> None:
+    """将日志保存到数据库中 (异步非阻塞)"""
+    if not logs:
+        return
+    
+    try:
+        # 使用异步会话保存日志
+        async with log_async_session_factory() as session:
+            for log_data in logs:
                 try:
-                    body_json = json.loads(body)
-                    # 过滤敏感字段
-                    sensitive_fields = ["password", "token", "api_key", "secret"]
-                    if isinstance(body_json, dict):
-                        filtered_body = {
-                            k: v if k.lower() not in sensitive_fields else "[FILTERED]"
-                            for k, v in body_json.items()
-                        }
-                        log_entry["request_body"] = filtered_body
-                except json.JSONDecodeError:
-                    # 如果不是JSON，则存储原始内容的长度
-                    log_entry["request_body"] = {"_raw_length": len(body)}
-        except Exception as e:
-            logger.warning(f"无法提取请求体: {str(e)}")
-
-        # 提取用户ID（如果有）
-        try:
-            user = request.state.user if hasattr(request.state, "user") else None
-            if user:
-                log_entry["user_id"] = str(user.id)
-        except Exception as e:
-            logger.warning(f"无法提取用户ID: {str(e)}")
-
-        # 创建自定义发送函数来捕获响应
-        response_body = []
-        send_complete = False
-        response_status = 200
-        response_headers = []
-        
-        async def send_wrapper(message):
-            nonlocal send_complete, response_status, response_headers
+                    # 创建日志对象
+                    api_log = ApiLog(
+                        id=uuid.UUID(log_data["id"]) if isinstance(log_data["id"], str) else log_data["id"],
+                        method=log_data.get("method"),
+                        path=log_data.get("path"),
+                        query_params=log_data.get("query_params"),
+                        headers=log_data.get("headers"),
+                        client_ip=log_data.get("client_ip"),
+                        user_agent=log_data.get("user_agent"),
+                        request_body=log_data.get("request_body"),
+                        status_code=log_data.get("status_code"),
+                        response_body=log_data.get("response_body"),
+                        process_time=log_data.get("duration_ms"),
+                        user_id=uuid.UUID(log_data["user_id"]) if "user_id" in log_data and log_data["user_id"] else None,
+                        error=log_data.get("error"),
+                    )
+                    session.add(api_log)
+                except Exception as e:
+                    logger.error(f"创建日志对象时出错: {str(e)}")
             
-            if message["type"] == "http.response.start":
-                response_status = message["status"]
-                response_headers = message["headers"]
-                await send(message)
-            elif message["type"] == "http.response.body":
-                if message.get("body"):
-                    response_body.append(message.get("body", b""))
-                if not message.get("more_body", False):
-                    send_complete = True
-                await send(message)
-            else:
-                await send(message)
-        
-        # 调用下一个中间件或路由处理函数
-        try:
-            await self.app(scope, receive, send_wrapper)
-
-            # 记录响应信息
-            log_entry["status_code"] = response_status
-            
-            # 尝试解析响应体
-            if response_body:
-                full_response_body = b"".join(response_body)
-                
-                # 尝试解析为JSON
-                try:
-                    body_json = json.loads(full_response_body)
-                    log_entry["response_body"] = body_json
-                except json.JSONDecodeError:
-                    # 如果不是JSON，则存储原始内容的长度
-                    log_entry["response_body"] = {"_raw_length": len(full_response_body)}
-            else:
-                log_entry["response_body"] = {"_raw_length": 0}
-
-        except Exception as e:
-            # 记录错误信息
-            log_entry["error"] = str(e)
-            logger.exception(f"请求处理出错: {str(e)}")
-            raise
-        finally:
-            # 计算处理时间
-            process_time = int((time.time() - start_time) * 1000)  # 毫秒
-            log_entry["process_time"] = process_time
-
-            # 异步保存日志
-            try:
-                await self._save_log(log_entry)
-            except Exception as e:
-                logger.exception(f"保存API日志出错: {str(e)}")
-
-        # 中间件不返回响应，因为我们已经通过 send 函数发送了响应
-
-    async def _save_log(self, log_data: Dict[str, Any]) -> None:
-        """
-        保存日志到数据库
-
-        Args:
-            log_data: 日志数据
-        """
-        # 创建API日志对象
-        api_log = ApiLog(
-            id=uuid.UUID(log_data["id"]) if "id" in log_data else uuid.uuid4(),
-            method=log_data.get("method"),
-            path=log_data.get("path"),
-            query_params=log_data.get("query_params"),
-            headers=log_data.get("headers"),
-            client_ip=log_data.get("client_ip"),
-            user_agent=log_data.get("user_agent"),
-            request_body=log_data.get("request_body"),
-            status_code=log_data.get("status_code"),
-            response_body=log_data.get("response_body"),
-            process_time=log_data.get("process_time"),
-            user_id=uuid.UUID(log_data["user_id"]) if "user_id" in log_data else None,
-            error=log_data.get("error"),
-        )
-
-        # 保存到数据库
-        async with async_session_factory() as session:
-            session.add(api_log)
+            # 批量提交
             try:
                 await session.commit()
+                logger.debug(f"成功将 {len(logs)} 条日志写入数据库")
             except Exception as e:
                 await session.rollback()
-                logger.exception(f"保存API日志到数据库失败: {str(e)}")
+                logger.error(f"提交日志到数据库时出错: {str(e)}")
+    except Exception as e:
+        logger.exception(f"保存日志到数据库时出错: {str(e)}")
+
+
+async def _log_worker():
+    """
+    后台工作线程，处理日志队列
+    完全独立于请求处理流程
+    """
+    global _log_queue, _is_worker_running
+
+    try:
+        db_batch = [] # 数据库写入批次
+        
+        while True:
+            # 如果队列为空，等待一小段时间
+            if not _log_queue:
+                # 如果有待写入数据库的批次，则先写入
+                if LOG_DB_ENABLED and db_batch:
+                    await _save_logs_to_db(db_batch)
+                    db_batch = []
+                await asyncio.sleep(0.1)
+                continue
+
+            # 批量处理日志记录，提高效率
+            logs_to_process = _log_queue.copy()
+            _log_queue.clear()
+
+            # 文件日志处理
+            if LOG_FILE_ENABLED:
+                try:
+                    # 批量写入文件
+                    with open(LOG_FILE, "a", encoding="utf-8") as f:
+                        for log in logs_to_process:
+                            try:
+                                f.write(json.dumps(log, ensure_ascii=False) + "\n")
+                            except:
+                                pass  # 忽略单条日志的序列化错误
+
+                    logger.debug(f"成功写入 {len(logs_to_process)} 条日志到文件")
+                except Exception as e:
+                    logger.error(f"写入日志文件时出错: {str(e)}")
+            
+            # 数据库日志处理
+            if LOG_DB_ENABLED:
+                # 累积到批次中
+                db_batch.extend(logs_to_process)
+                
+                # 如果批次足够大，执行数据库写入
+                if len(db_batch) >= BATCH_SIZE:
+                    await _save_logs_to_db(db_batch)
+                    db_batch = []
+
+            # 为防止CPU资源争用，短暂休眠
+            await asyncio.sleep(0.01)
+    except Exception as e:
+        logger.exception(f"日志工作线程异常: {str(e)}")
+    finally:
+        _is_worker_running = False
+
+
+class ApiLogMiddleware:
+    """极简化API日志中间件 - 不阻塞主请求流程"""
+
+    def __init__(self, app: FastAPI) -> None:
+        """初始化中间件"""
+        self.app = app
+
+        # 启动工作线程
+        global _is_worker_running
+        if not _is_worker_running:
+            _is_worker_running = True
+            asyncio.create_task(_log_worker())
+
+    async def __call__(
+        self, scope: Dict[str, Any], receive: Callable, send: Callable
+    ) -> None:
+        """ASGI 中间件接口"""
+        # 跳过非HTTP请求
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        # 记录开始时间
+        start_time = time.time()
+
+        # 创建基本日志记录
+        request_id = str(uuid.uuid4())
+        path = scope.get("path", "Unknown")
+        method = scope.get("method", "Unknown")
+
+        # 尝试提取更多请求信息
+        headers = {}
+        client_ip = None
+        query_params = {}
+        user_agent = None
+        
+        # 安全地提取头信息
+        try:
+            headers_raw = scope.get("headers", [])
+            headers = {k.decode("utf8"): v.decode("utf8") for k, v in headers_raw}
+            client_ip = scope.get("client", ("0.0.0.0", 0))[0]
+            user_agent = headers.get("user-agent")
+            
+            # 提取查询参数
+            query_string = scope.get("query_string", b"").decode("utf8")
+            if query_string:
+                query_params = dict(item.split("=") for item in query_string.split("&") if "=" in item)
+        except Exception as e:
+            logger.debug(f"提取请求元数据时出错: {str(e)}")
+        
+        # 准备基本日志条目
+        log_entry = {
+            "id": request_id,
+            "timestamp": time.time(),
+            "method": method,
+            "path": path,
+            "request_time": start_time,
+            "client_ip": client_ip,
+            "user_agent": user_agent,
+            "query_params": query_params,
+            "headers": headers,
+        }
+
+        # 定义包装发送函数
+        original_send = send
+
+        async def wrapped_send(message):
+            if message["type"] == "http.response.start":
+                # 记录状态码
+                log_entry["status_code"] = message.get("status", 0)
+
+            elif message["type"] == "http.response.body" and not message.get(
+                "more_body", False
+            ):
+                # 记录响应完成时间
+                log_entry["response_time"] = time.time()
+                log_entry["duration_ms"] = int((time.time() - start_time) * 1000)
+
+                # 将日志入队 - 完全非阻塞
+                global _log_queue
+                _log_queue.append(log_entry.copy())
+
+            # 继续发送响应
+            return await original_send(message)
+
+        # 调用下一个中间件或应用处理程序
+        try:
+            await self.app(scope, receive, wrapped_send)
+        except Exception as e:
+            # 记录异常但不影响异常传播
+            log_entry["error"] = str(e)
+            log_entry["response_time"] = time.time()
+            log_entry["duration_ms"] = int((time.time() - start_time) * 1000)
+            _log_queue.append(log_entry.copy())
+            raise

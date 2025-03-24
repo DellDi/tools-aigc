@@ -13,6 +13,18 @@ class ToolCallRequest(BaseModel):
     name: str = Field(..., description="工具名称")
     parameters: Dict[str, Any] = Field(default_factory=dict, description="工具参数")
 
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "name": "echo",
+                "parameters": {
+                    "message": "Hello, Tools-AIGC!",
+                    "prefix": "Echo:",
+                    "suffix": "- From Client Example",
+                },
+            }
+        }
+
 
 class ToolCallResponse(BaseModel):
     """工具调用响应"""
@@ -66,7 +78,9 @@ class OpenAIMessage(BaseModel):
     role: str = Field(..., description="角色")
     content: Optional[str] = Field(default=None, description="内容")
     name: Optional[str] = Field(default=None, description="名称")
-    tool_calls: Optional[List[OpenAIToolCall]] = Field(default=None, description="工具调用")
+    tool_calls: Optional[List[OpenAIToolCall]] = Field(
+        default=None, description="工具调用"
+    )
     tool_call_id: Optional[str] = Field(default=None, description="工具调用ID")
 
 
@@ -76,7 +90,9 @@ class OpenAIToolsRequest(BaseModel):
     model: str = Field(..., description="模型名称")
     messages: List[OpenAIMessage] = Field(..., description="消息列表")
     tools: Optional[List[Dict[str, Any]]] = Field(default=None, description="工具列表")
-    tool_choice: Optional[Union[str, Dict[str, Any]]] = Field(default="auto", description="工具选择")
+    tool_choice: Optional[Union[str, Dict[str, Any]]] = Field(
+        default="auto", description="工具选择"
+    )
     temperature: Optional[float] = Field(default=0.7, description="温度")
     max_tokens: Optional[int] = Field(default=None, description="最大令牌数")
     stream: Optional[bool] = Field(default=False, description="是否流式输出")
