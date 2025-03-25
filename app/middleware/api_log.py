@@ -9,11 +9,10 @@ import logging
 import os
 import time
 import uuid
-from datetime import datetime
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List
 
 from fastapi import FastAPI
-from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
+from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
 
 from app.core.config import settings
 from app.db.models.api_log import ApiLog
@@ -52,16 +51,18 @@ _log_queue: List[Dict[str, Any]] = []
 _is_worker_running = False
 
 # 日志写入模式
-LOG_FILE_ENABLED = True    # 启用文件日志
-LOG_DB_ENABLED = True      # 启用数据库日志
-BATCH_SIZE = 50            # 批量写入数据库的日志数量
+LOG_FILE_ENABLED = True  # 启用文件日志
+LOG_DB_ENABLED = True  # 启用数据库日志
+BATCH_SIZE = 50  # 批量写入数据库的日志数量
+CAPTURE_RESPONSE_BODY = True  # 是否捕获响应体
+MAX_RESPONSE_SIZE = 1024 * 1024  # 最大响应体大小 (1MB)
 
 
 async def _save_logs_to_db(logs: List[Dict[str, Any]]) -> None:
     """将日志保存到数据库中 (异步非阻塞)"""
     if not logs:
         return
-    
+
     try:
         # 使用异步会话保存日志
         async with log_async_session_factory() as session:
@@ -69,7 +70,11 @@ async def _save_logs_to_db(logs: List[Dict[str, Any]]) -> None:
                 try:
                     # 创建日志对象
                     api_log = ApiLog(
-                        id=uuid.UUID(log_data["id"]) if isinstance(log_data["id"], str) else log_data["id"],
+                        id=(
+                            uuid.UUID(log_data["id"])
+                            if isinstance(log_data["id"], str)
+                            else log_data["id"]
+                        ),
                         method=log_data.get("method"),
                         path=log_data.get("path"),
                         query_params=log_data.get("query_params"),
@@ -80,13 +85,17 @@ async def _save_logs_to_db(logs: List[Dict[str, Any]]) -> None:
                         status_code=log_data.get("status_code"),
                         response_body=log_data.get("response_body"),
                         process_time=log_data.get("duration_ms"),
-                        user_id=uuid.UUID(log_data["user_id"]) if "user_id" in log_data and log_data["user_id"] else None,
+                        user_id=(
+                            uuid.UUID(log_data["user_id"])
+                            if "user_id" in log_data and log_data["user_id"]
+                            else None
+                        ),
                         error=log_data.get("error"),
                     )
                     session.add(api_log)
                 except Exception as e:
                     logger.error(f"创建日志对象时出错: {str(e)}")
-            
+
             # 批量提交
             try:
                 await session.commit()
@@ -106,8 +115,8 @@ async def _log_worker():
     global _log_queue, _is_worker_running
 
     try:
-        db_batch = [] # 数据库写入批次
-        
+        db_batch = []  # 数据库写入批次
+
         while True:
             # 如果队列为空，等待一小段时间
             if not _log_queue:
@@ -136,12 +145,12 @@ async def _log_worker():
                     logger.debug(f"成功写入 {len(logs_to_process)} 条日志到文件")
                 except Exception as e:
                     logger.error(f"写入日志文件时出错: {str(e)}")
-            
+
             # 数据库日志处理
             if LOG_DB_ENABLED:
                 # 累积到批次中
                 db_batch.extend(logs_to_process)
-                
+
                 # 如果批次足够大，执行数据库写入
                 if len(db_batch) >= BATCH_SIZE:
                     await _save_logs_to_db(db_batch)
@@ -190,21 +199,24 @@ class ApiLogMiddleware:
         client_ip = None
         query_params = {}
         user_agent = None
-        
+        request_body = None
+
         # 安全地提取头信息
         try:
             headers_raw = scope.get("headers", [])
             headers = {k.decode("utf8"): v.decode("utf8") for k, v in headers_raw}
             client_ip = scope.get("client", ("0.0.0.0", 0))[0]
             user_agent = headers.get("user-agent")
-            
+
             # 提取查询参数
             query_string = scope.get("query_string", b"").decode("utf8")
             if query_string:
-                query_params = dict(item.split("=") for item in query_string.split("&") if "=" in item)
+                query_params = dict(
+                    item.split("=") for item in query_string.split("&") if "=" in item
+                )
         except Exception as e:
             logger.debug(f"提取请求元数据时出错: {str(e)}")
-        
+
         # 准备基本日志条目
         log_entry = {
             "id": request_id,
@@ -218,31 +230,94 @@ class ApiLogMiddleware:
             "headers": headers,
         }
 
+        # 创建请求体捕获包装函数
+        request_body_chunks = []
+        body_complete = False
+
+        async def receive_wrapper():
+            nonlocal body_complete
+            
+            # 调用原始 receive 函数
+            message = await receive()
+            
+            # 捕获请求体
+            if message["type"] == "http.request":
+                # 收集请求体
+                chunk = message.get("body", b"")
+                if chunk:
+                    request_body_chunks.append(chunk)
+                
+                # 检查是否是最后一个请求块
+                if not message.get("more_body", False):
+                    body_complete = True
+                    full_body = b"".join(request_body_chunks)
+                    
+                    # 尝试解析为JSON
+                    try:
+                        json_body = json.loads(full_body)
+                        log_entry["request_body"] = json_body
+                    except json.JSONDecodeError:
+                        # 非JSON请求体
+                        content_type = headers.get("content-type", "")
+                        log_entry["request_body"] = {
+                            "_content_type": content_type,
+                            "_size": len(full_body),
+                            "_preview": full_body[:200].decode("utf-8", errors="replace") if len(full_body) > 0 else ""
+                        }
+            
+            return message
+        
         # 定义包装发送函数
         original_send = send
+        response_chunks = []
 
         async def wrapped_send(message):
             if message["type"] == "http.response.start":
                 # 记录状态码
                 log_entry["status_code"] = message.get("status", 0)
+                # 记录响应头
+                headers = [(k.decode("utf-8"), v.decode("utf-8")) for k, v in message.get("headers", [])]
+                log_entry["response_headers"] = dict(headers)
 
-            elif message["type"] == "http.response.body" and not message.get(
-                "more_body", False
-            ):
-                # 记录响应完成时间
-                log_entry["response_time"] = time.time()
-                log_entry["duration_ms"] = int((time.time() - start_time) * 1000)
+            elif message["type"] == "http.response.body":
+                # 收集响应体(最大限制为1MB以避免内存问题)
+                if CAPTURE_RESPONSE_BODY:
+                    body = message.get("body", b"")
+                    if body and len(response_chunks) < 5 and sum(len(chunk) for chunk in response_chunks) < MAX_RESPONSE_SIZE:
+                        response_chunks.append(body)
+                
+                # 如果这是最后一个响应块
+                if not message.get("more_body", False):
+                    # 记录响应完成时间
+                    log_entry["response_time"] = time.time()
+                    log_entry["duration_ms"] = int((time.time() - start_time) * 1000)
+                    
+                    # 处理响应体(如果有)
+                    if CAPTURE_RESPONSE_BODY and response_chunks:
+                        full_body = b"".join(response_chunks)
+                        try:
+                            # 尝试解析为JSON
+                            response_json = json.loads(full_body)
+                            log_entry["response_body"] = response_json
+                        except json.JSONDecodeError:
+                            # 非JSON响应，记录类型信息和大小
+                            content_type = log_entry.get("response_headers", {}).get("content-type", "")
+                            log_entry["response_body"] = {
+                                "_content_type": content_type,
+                                "_size": len(full_body),
+                                "_preview": full_body[:200].decode("utf-8", errors="replace") if len(full_body) > 0 else ""
+                            }
 
-                # 将日志入队 - 完全非阻塞
-                global _log_queue
-                _log_queue.append(log_entry.copy())
+                    # 将日志入队 - 完全非阻塞
+                    global _log_queue
+                    _log_queue.append(log_entry.copy())
 
             # 继续发送响应
             return await original_send(message)
 
         # 调用下一个中间件或应用处理程序
         try:
-            await self.app(scope, receive, wrapped_send)
+            await self.app(scope, receive_wrapper, wrapped_send)
         except Exception as e:
             # 记录异常但不影响异常传播
             log_entry["error"] = str(e)
