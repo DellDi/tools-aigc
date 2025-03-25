@@ -4,12 +4,14 @@
 """
 
 import asyncio
+import datetime
 import json
 import logging
 import os
 import time
 import uuid
-from typing import Any, Callable, Dict, List
+from pathlib import Path
+from typing import Any, Callable, Dict, List, Optional
 
 from fastapi import FastAPI
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
@@ -19,12 +21,12 @@ from app.db.models.api_log import ApiLog
 
 logger = logging.getLogger(__name__)
 
+
 # 确保日志目录存在
 LOG_DIR = os.path.join(
     os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "logs"
 )
 os.makedirs(LOG_DIR, exist_ok=True)
-LOG_FILE = os.path.join(LOG_DIR, "api_logs.jsonl")
 
 # 创建独立的异步数据库引擎，专门用于日志记录
 # 这样可以避免与主应用的数据库连接池冲突
@@ -50,18 +52,79 @@ log_async_session_factory = async_sessionmaker(
 _log_queue: List[Dict[str, Any]] = []
 _is_worker_running = False
 
-# 日志写入模式
-LOG_FILE_ENABLED = True  # 启用文件日志
-LOG_DB_ENABLED = True  # 启用数据库日志
-BATCH_SIZE = 50  # 批量写入数据库的日志数量
-CAPTURE_RESPONSE_BODY = True  # 是否捕获响应体
-MAX_RESPONSE_SIZE = 1024 * 1024  # 最大响应体大小 (1MB)
+# 日志写入模式 - 从 settings 获取配置
+LOG_FILE_ENABLED = settings.LOG_FILE_ENABLED  # 启用文件日志
+LOG_DB_ENABLED = settings.LOG_DB_ENABLED  # 启用数据库日志
+BATCH_SIZE = settings.BATCH_SIZE  # 批量写入数据库的日志数量
+CAPTURE_RESPONSE_BODY = settings.CAPTURE_RESPONSE_BODY  # 是否捕获响应体
+MAX_RESPONSE_SIZE = settings.MAX_RESPONSE_SIZE  # 最大响应体大小 (1MB)
 
+# 日志轮转设置
+LOG_ROTATION_BY_DAY = settings.LOG_ROTATION_BY_DAY  # 按天轮转
+LOG_MAX_SIZE = settings.LOG_MAX_SIZE  # 单个日志文件最大大小（5MB）
+
+# 数据库记录策略
+DB_LOG_ERRORS_ONLY = settings.DB_LOG_ERRORS_ONLY  # 只记录错误和异常请求
+
+# 当前日志文件信息
+_current_log_date = None
+_current_log_file = None
+_current_log_size = 0
+_current_log_index = 0
+
+
+def get_log_file_path() -> str:
+    """获取当前日志文件路径，并处理日志轮转"""
+    global _current_log_date, _current_log_file, _current_log_size, _current_log_index
+    
+    today = datetime.date.today()
+    
+    # 检查是否需要按天轮转
+    if LOG_ROTATION_BY_DAY and _current_log_date != today:
+        _current_log_date = today
+        _current_log_index = 0
+        _current_log_size = 0
+    
+    # 构造日志文件名
+    date_str = today.strftime("%Y-%m-%d")
+    if _current_log_index == 0:
+        file_name = f"api_logs_{date_str}.jsonl"
+    else:
+        file_name = f"api_logs_{date_str}.{_current_log_index}.jsonl"
+    
+    log_path = os.path.join(LOG_DIR, file_name)
+    
+    # 检查文件大小
+    if _current_log_file != log_path:
+        _current_log_file = log_path
+        if os.path.exists(log_path):
+            _current_log_size = os.path.getsize(log_path)
+        else:
+            _current_log_size = 0
+    
+    # 检查是否需要按大小轮转
+    if _current_log_size >= LOG_MAX_SIZE:
+        _current_log_index += 1
+        return get_log_file_path()  # 递归获取新文件路径
+    
+    return log_path
 
 async def _save_logs_to_db(logs: List[Dict[str, Any]]) -> None:
     """将日志保存到数据库中 (异步非阻塞)"""
     if not logs:
         return
+        
+    # 如果设置为只记录错误，则过滤日志
+    if DB_LOG_ERRORS_ONLY:
+        # 只保留状态码 >= 400 或有error字段的日志
+        logs = [
+            log for log in logs 
+            if (log.get("status_code", 0) >= 400 or log.get("error"))
+        ]
+        
+        # 如果过滤后没有需要记录的日志，直接返回
+        if not logs:
+            return
 
     try:
         # 使用异步会话保存日志
@@ -134,15 +197,22 @@ async def _log_worker():
             # 文件日志处理
             if LOG_FILE_ENABLED:
                 try:
+                    # 获取当前日志文件路径（自动处理轮转）
+                    log_file_path = get_log_file_path()
+                    
                     # 批量写入文件
-                    with open(LOG_FILE, "a", encoding="utf-8") as f:
+                    with open(log_file_path, "a", encoding="utf-8") as f:
                         for log in logs_to_process:
                             try:
-                                f.write(json.dumps(log, ensure_ascii=False) + "\n")
+                                log_line = json.dumps(log, ensure_ascii=False) + "\n"
+                                f.write(log_line)
+                                # 更新当前文件大小
+                                global _current_log_size
+                                _current_log_size += len(log_line.encode('utf-8'))
                             except:
                                 pass  # 忽略单条日志的序列化错误
 
-                    logger.debug(f"成功写入 {len(logs_to_process)} 条日志到文件")
+                    logger.debug(f"成功写入 {len(logs_to_process)} 条日志到文件 {os.path.basename(log_file_path)}")
                 except Exception as e:
                     logger.error(f"写入日志文件时出错: {str(e)}")
 
