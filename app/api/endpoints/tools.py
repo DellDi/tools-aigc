@@ -305,16 +305,31 @@ async def openai_tools(
             )
         # 自动模式（流式）：屏蔽中间态，直接返回结果
         else:
-            # TODO: 自动模式的流式响应实现，当前版本暂不支持
-            # 退回到非流式模式
-            logger.warning("自动模式暂不支持流式响应，退回到标准响应")
-            return await handle_auto_tool_workflow(
-                processed_messages, 
-                available_tools_list, 
-                mapped_model, 
-                mode, 
-                session_id=session_id, 
-                output_format=output_format
+            logger.info(f"使用自动模式流式响应, 会话ID: {session_id}")
+            
+            # 在自动模式下获取工具调用
+            if mode == "conversation":
+                # 对于纯对话模式，没有工具调用，返回空工具列表
+                tool_calls = []
+            elif mode == "tool_call":
+                # 已经是工具调用模式
+                last_message = processed_messages[-1]
+                tool_calls = last_message.get("tool_calls", [])
+            else:  # hybrid
+                # 使用混合模式处理器获取工具调用
+                tool_added_message = await handle_hybrid_mode(processed_messages, available_tools_list, mapped_model)
+                tool_calls = tool_added_message.get("tool_calls", [])
+            
+            # 返回自动模式流式响应
+            return await create_streaming_response(
+                request=req,
+                model=mapped_model,
+                messages=processed_messages,
+                tool_calls=tool_calls,
+                execute_tool_calls_func=execute_tool_calls,
+                session_id=session_id,
+                output_format=output_format,
+                auto_mode=True  # 标记为自动模式
             )
     
     # 非流式请求处理
