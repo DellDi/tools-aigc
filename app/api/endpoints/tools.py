@@ -143,7 +143,12 @@ async def call_tool(
 
 
 @router.post("/openai/v1/chat/completions", response_model=OpenAIToolsResponse, summary="OpenAI兼容的统一端点")
-async def openai_tools(request: OpenAIToolsRequest, authorization: Optional[str] = Header(None)):
+async def openai_tools(
+    request: OpenAIToolsRequest, 
+    authorization: Optional[str] = Header(None),
+    x_session_id: Optional[str] = Header(None, alias="X-Session-Id"),
+    x_output_format: Optional[str] = Header(None, alias="X-Output-Format"),
+):
     """
     OpenAI兼容的统一API端点
 
@@ -245,15 +250,58 @@ async def openai_tools(request: OpenAIToolsRequest, authorization: Optional[str]
     
     logger.info(f"请求类型: {mode}")
     
+    # 初始化或获取会话
+    from app.core.session import session_manager
+    
+    session_id = x_session_id
+    output_format = x_output_format or "json"
+    
+    # 获取或创建会话
+    if session_id:
+        session = session_manager.get_or_create_session(session_id)
+        # 将消息添加到会话历史
+        for msg in request.messages:
+            session.add_message(msg.model_dump())
+        logger.info(f"使用现有会话: {session_id}, 消息数: {len(session.get_messages())}")
+    else:
+        # 创建一个新会话
+        session = session_manager.create_session()
+        session_id = session.session_id
+        # 添加初始消息
+        for msg in request.messages:
+            session.add_message(msg.model_dump())
+        logger.info(f"创建新会话: {session_id}")
+    
     # 标准两阶段模式：客户端期望看到工具调用中间态
     if tool_choice_manual:
-        return await handle_standard_tool_workflow(processed_messages, available_tools_list, mapped_model, mode)
+        return await handle_standard_tool_workflow(
+            processed_messages, 
+            available_tools_list, 
+            mapped_model, 
+            mode, 
+            session_id=session_id, 
+            output_format=output_format
+        )
     
     # 自动模式：屏蔽中间态，直接返回结果
-    return await handle_auto_tool_workflow(processed_messages, available_tools_list, mapped_model, mode)
+    return await handle_auto_tool_workflow(
+        processed_messages, 
+        available_tools_list, 
+        mapped_model, 
+        mode, 
+        session_id=session_id, 
+        output_format=output_format
+    )
 
 
-async def handle_standard_tool_workflow(messages: List[Dict], available_tools: List[Dict], model: str, mode: str) -> OpenAIToolsResponse:
+async def handle_standard_tool_workflow(
+    messages: List[Dict], 
+    available_tools: List[Dict], 
+    model: str, 
+    mode: str,
+    session_id: Optional[str] = None,
+    output_format: str = "json"
+) -> OpenAIToolsResponse:
     """
     处理标准OpenAI兼容的工具调用流程（两阶段）
     此模式与OpenAI API完全兼容，适用于客户端需要自行处理工具调用的场景
@@ -309,7 +357,14 @@ async def handle_standard_tool_workflow(messages: List[Dict], available_tools: L
         return await handle_hybrid_mode(messages, conversation_response, available_tools)
 
 
-async def handle_auto_tool_workflow(messages: List[Dict], available_tools: List[Dict], model: str, mode: str) -> OpenAIToolsResponse:
+async def handle_auto_tool_workflow(
+    messages: List[Dict], 
+    available_tools: List[Dict], 
+    model: str, 
+    mode: str,
+    session_id: Optional[str] = None,
+    output_format: str = "json"
+) -> OpenAIToolsResponse:
     """
     处理自动工具调用流程（屏蔽中间态）
     此模式对客户端屏蔽工具调用细节，直接返回最终结果
@@ -332,7 +387,11 @@ async def handle_auto_tool_workflow(messages: List[Dict], available_tools: List[
             return await handle_conversation(messages, model)
 
         # 执行工具调用
-        tool_call_results = await execute_tool_calls(last_message["tool_calls"])
+        tool_call_results = await execute_tool_calls(
+            last_message["tool_calls"],
+            session_id=session_id,
+            output_format=output_format
+        )
         
         # 将工具调用结果加入到消息列表中
         for result in tool_call_results:
@@ -365,7 +424,11 @@ async def handle_auto_tool_workflow(messages: List[Dict], available_tools: List[
         return conversation_response
     
     # 第二步：执行工具调用
-    tool_call_results = await execute_tool_calls(tool_calls)
+    tool_call_results = await execute_tool_calls(
+        tool_calls,
+        session_id=session_id,
+        output_format=output_format
+    )
     
     # 第三步：构建完整的上下文
     full_messages = messages.copy()
@@ -388,16 +451,34 @@ async def handle_auto_tool_workflow(messages: List[Dict], available_tools: List[
     return final_response
 
 
-async def execute_tool_calls(tool_calls: List[Dict]) -> List[Dict]:
+async def execute_tool_calls(tool_calls: List[Dict], session_id: Optional[str] = None, output_format: str = "json") -> List[Dict]:
     """
     执行工具调用并返回结果
     
     Args:
         tool_calls: 工具调用列表
+        session_id: 会话ID，用于会话级工具权限管理
+        output_format: 输出格式 (json, markdown, text, html)
         
     Returns:
         List[Dict]: 工具调用结果列表
     """
+    # 导入缓存、会话管理和格式化模块
+    from app.core.cache import tool_cache
+    from app.core.session import session_manager
+    from app.core.formatter import tool_formatter, OutputFormat
+    
+    # 格式化选项
+    try:
+        format_option = OutputFormat(output_format.lower())
+    except ValueError:
+        format_option = OutputFormat.JSON
+    
+    # 尝试获取会话
+    session = None
+    if session_id:
+        session = session_manager.get_session(session_id)
+    
     tool_call_results = []
     for tool_call in tool_calls:
         # 获取工具名称和参数
@@ -407,24 +488,73 @@ async def execute_tool_calls(tool_calls: List[Dict]) -> List[Dict]:
         try:
             # 解析参数
             arguments = json.loads(function_call["arguments"])
+            
+            # 检查会话级工具权限
+            if session and not session.is_tool_allowed(tool_name):
+                raise PermissionError(f"会话 {session_id} 没有权限使用工具 {tool_name}")
 
-            # 获取工具
-            tool = ToolRegistry.get_tool(tool_name)
-            if not tool:
-                raise ValueError(f"工具 {tool_name} 不存在")
+            # 检查缓存
+            cached_result = tool_cache.get(tool_name, arguments)
+            if cached_result:
+                logger.info(f"使用缓存结果: {tool_name}")
+                result = cached_result
+            else:
+                # 获取工具
+                tool = ToolRegistry.get_tool(tool_name)
+                if not tool:
+                    raise ValueError(f"工具 {tool_name} 不存在")
 
-            # 调用工具
-            result = await tool.run(**arguments)
+                # 调用工具
+                logger.info(f"执行工具调用: {tool_name} 参数: {arguments}")
+                result = await tool.run(**arguments)
+                
+                # 缓存结果（仅缓存成功的结果）
+                if result.success:
+                    tool_cache.set(tool_name, arguments, result)
+            
+            # 记录工具调用到会话历史
+            if session:
+                session.add_message({
+                    "role": "function",
+                    "name": tool_name,
+                    "content": json.dumps({
+                        "arguments": arguments,
+                        "result": {
+                            "success": result.success,
+                            "data": result.data,
+                            "error": result.error
+                        }
+                    }, ensure_ascii=False)
+                })
 
-            # 构建结果
-            output = json.dumps(
-                {
-                    "success": result.success,
-                    "data": result.data,
-                    "error": result.error
-                },
-                ensure_ascii=False
+            # 构建并格式化结果
+            result_dict = {
+                "success": result.success,
+                "data": result.data,
+                "error": result.error
+            }
+            
+            # 应用格式化（保留原始JSON以供LLM处理）
+            formatted_result = tool_formatter.format_result(
+                result_dict, 
+                output_format=format_option,
+                include_metadata=True
             )
+            
+            # 添加元数据
+            metadata = {
+                "tool_name": tool_name,
+                "cached": cached_result is not None,
+                "format": output_format,
+                "timestamp": time.time()
+            }
+            
+            # 构建输出
+            output = json.dumps({
+                "result": result_dict,
+                "formatted": formatted_result,
+                "metadata": metadata
+            }, ensure_ascii=False)
 
             tool_call_results.append({
                 "tool_call_id": tool_call["id"],
@@ -432,17 +562,46 @@ async def execute_tool_calls(tool_calls: List[Dict]) -> List[Dict]:
             })
 
         except Exception as e:
-            logger.exception(f"处理工具调用 {tool_name} 出错: {str(e)}")
+            error_message = str(e)
+            logger.exception(f"处理工具调用 {tool_name} 出错: {error_message}")
+            
+            error_result = {
+                "success": False,
+                "data": None,
+                "error": f"处理工具调用出错: {error_message}"
+            }
+            
+            # 格式化错误信息
+            formatted_error = tool_formatter.format_result(
+                error_result,
+                output_format=format_option,
+                include_metadata=True
+            )
+            
+            output = json.dumps({
+                "result": error_result,
+                "formatted": formatted_error,
+                "metadata": {
+                    "tool_name": tool_name,
+                    "error": True,
+                    "format": output_format,
+                    "timestamp": time.time()
+                }
+            }, ensure_ascii=False)
+            
             tool_call_results.append({
                 "tool_call_id": tool_call["id"],
-                "output": json.dumps(
-                    {
-                        "success": False,
-                        "data": None,
-                        "error": f"处理工具调用出错: {str(e)}"
-                    },
-                    ensure_ascii=False
-                )
+                "output": output
             })
+            
+            # 记录错误到会话历史
+            if session:
+                session.add_message({
+                    "role": "function",
+                    "name": tool_name,
+                    "content": json.dumps({
+                        "error": error_message
+                    }, ensure_ascii=False)
+                })
     
     return tool_call_results
