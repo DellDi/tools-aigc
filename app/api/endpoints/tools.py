@@ -7,10 +7,13 @@ import json
 import logging
 import time
 import uuid
-from typing import Optional, Dict, List, Any
+from typing import Optional, Dict, List, Any, Union
 
 from fastapi import APIRouter, HTTPException, Path, Header, Request
+from fastapi.responses import StreamingResponse
 import httpx
+
+from app.core.streaming import create_streaming_response
 
 from app.core.config import settings
 from app.core.message_processor import process_messages, handle_hybrid_mode
@@ -145,10 +148,11 @@ async def call_tool(
 @router.post("/openai/v1/chat/completions", response_model=OpenAIToolsResponse, summary="OpenAI兼容的统一端点")
 async def openai_tools(
     request: OpenAIToolsRequest, 
+    req: Request,
     authorization: Optional[str] = Header(None),
     x_session_id: Optional[str] = Header(None, alias="X-Session-Id"),
     x_output_format: Optional[str] = Header(None, alias="X-Output-Format"),
-):
+) -> Union[OpenAIToolsResponse, StreamingResponse]:
     """
     OpenAI兼容的统一API端点
 
@@ -272,6 +276,48 @@ async def openai_tools(
             session.add_message(msg.model_dump())
         logger.info(f"创建新会话: {session_id}")
     
+    # 检查是否为流式请求
+    stream_mode = request.stream or False
+    
+    # 如果是流式请求，使用流式响应
+    if stream_mode:
+        logger.info(f"使用流式响应模式, 会话ID: {session_id}")
+        
+        # 标准两阶段模式（流式）：客户端期望看到工具调用中间态
+        if tool_choice_manual:
+            # 获取工具调用
+            tool_calls = await get_tool_calls_for_streaming(
+                processed_messages,
+                available_tools_list,
+                mapped_model,
+                mode
+            )
+            
+            # 返回流式响应
+            return await create_streaming_response(
+                request=req,
+                model=mapped_model,
+                messages=processed_messages,
+                tool_calls=tool_calls,
+                execute_tool_calls_func=execute_tool_calls,
+                session_id=session_id,
+                output_format=output_format
+            )
+        # 自动模式（流式）：屏蔽中间态，直接返回结果
+        else:
+            # TODO: 自动模式的流式响应实现，当前版本暂不支持
+            # 退回到非流式模式
+            logger.warning("自动模式暂不支持流式响应，退回到标准响应")
+            return await handle_auto_tool_workflow(
+                processed_messages, 
+                available_tools_list, 
+                mapped_model, 
+                mode, 
+                session_id=session_id, 
+                output_format=output_format
+            )
+    
+    # 非流式请求处理
     # 标准两阶段模式：客户端期望看到工具调用中间态
     if tool_choice_manual:
         return await handle_standard_tool_workflow(
@@ -449,6 +495,36 @@ async def handle_auto_tool_workflow(
     # 第四步：生成最终回复
     final_response = await handle_conversation(full_messages, model)
     return final_response
+
+
+async def get_tool_calls_for_streaming(messages: List[Dict], available_tools: List[Dict], model: str, mode: str) -> List[Dict]:
+    """
+    获取用于流式响应的工具调用信息
+    
+    Args:
+        messages: 处理后的消息列表
+        available_tools: 可用工具列表
+        model: 模型名称
+        mode: 请求模式（conversation/hybrid/tool_call）
+        
+    Returns:
+        List[Dict]: 工具调用列表
+    """
+    # 如果已经是工具调用模式，直接获取工具调用
+    if mode == "tool_call":
+        last_message = messages[-1]
+        if "tool_calls" in last_message and last_message["tool_calls"]:
+            return last_message["tool_calls"]
+    
+    # 如果是混合模式，需要使用LLM分析并添加工具调用
+    elif mode == "hybrid":
+        # 使用混合模式处理器添加工具调用
+        tool_added_message = await handle_hybrid_mode(messages, available_tools, model)
+        if "tool_calls" in tool_added_message and tool_added_message["tool_calls"]:
+            return tool_added_message["tool_calls"]
+    
+    # 纯对话模式，没有工具调用
+    return []
 
 
 async def execute_tool_calls(tool_calls: List[Dict], session_id: Optional[str] = None, output_format: str = "json") -> List[Dict]:

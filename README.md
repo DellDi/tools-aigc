@@ -14,6 +14,7 @@ Tools-AIGC是一个基于FastAPI的服务，旨在提供统一的工具调用接
 - 支持工具调用缓存得以提高性能
 - 会话级工具权限管理与多轮对话支持
 - 多种输出格式支持（JSON、Markdown、Text、HTML）
+- 流式工具调用与响应（SSE格式，与OpenAI兼容）
 - PostgreSQL数据库存储和ORM支持
 - API调用日志记录
 - JWT认证和路由白名单
@@ -29,6 +30,7 @@ tools-aigc/
 │   ├── core/               # 核心模块
 │   │   ├── cache.py        # 工具调用缓存
 │   │   ├── config.py       # 应用配置
+│   │   ├── streaming.py    # 流式响应处理
 │   │   ├── formatter.py    # 结果格式化
 │   │   └── session.py      # 会话管理
 │   ├── db/                 # 数据库模块
