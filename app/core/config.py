@@ -26,26 +26,55 @@ class Settings(BaseSettings):
     APP_HOST: str = model_config.get("APP_HOST")
 
     # CORS配置
-    BACKEND_CORS_ORIGINS: List[AnyHttpUrl] = ['http://localhost:8000', 'http://127.0.0.1:8000', 'http://localhost:3000', 'http://127.0.0.1:3000']
+    BACKEND_CORS_ORIGINS: List[AnyHttpUrl] = [
+        "http://localhost:8000",
+        "http://127.0.0.1:8000",
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+    ]
 
     # 工具配置
     TOOLS_TIMEOUT: int = model_config.get("TOOLS_TIMEOUT")
 
-    # 通义API配置
+    # 各大模型 API 配置
     QWEN_API_KEY: Optional[str] = model_config.get("QWEN_API_KEY")
+    DEEPSEEK_API_KEY: Optional[str] = model_config.get("DEEPSEEK_API_KEY")
+
+    # 工具参数提取模型配置
+    TOOL_EXTRACTOR_MODEL: Optional[str] = model_config.get("TOOL_EXTRACTOR_MODEL", "gpt-3.5-turbo")
 
     # OpenWeatherMap API配置
     OPENWEATHERMAP_API_KEY: Optional[str] = model_config.get("OPENWEATHERMAP_API_KEY")
 
+    # LLM模型配置
+    # API Key映射，将请求中的API Key映射到对应的服务提供商
+    LLM_API_KEYS: dict = {
+        "sk-qwen": model_config.get("QWEN_API_KEY", ""),  # 通义千问
+        "sk-deepseek": model_config.get("DEEPSEEK_API_KEY", ""),  # DeepSeek
+        "default": model_config.get("QWEN_API_KEY", ""),  # 默认API Key
+    }
+
+    # 模型名称映射，将OpenAI风格的模型名称映射到实际的模型标识符
+    LLM_MODEL_MAPPING: dict = {
+        # 通义千问系列
+        "qwen-turbo": "qwen-turbo",
+        "qwen-plus": "qwen-plus",
+        "qwen-max": "qwen-max",
+        # DeepSeek系列
+        "deepseek-v3": "deepseek-v3",
+        "deepseek-r1": "deepseek-r1",
+    }
+
     # 数据库配置
     DATABASE_URL: str = model_config.get("DATABASE_URL")
-    
+
     @field_validator("DATABASE_URL", mode="before")
     def validate_database_url(cls, v: str) -> str:
         """验证数据库URL格式"""
         # 使用 PostgresDsn 进行验证，但返回字符串
         PostgresDsn(v)
         return v
+
     DATABASE_POOL_SIZE: int = model_config.get("DATABASE_POOL_SIZE")
     DATABASE_MAX_OVERFLOW: int = model_config.get("DATABASE_MAX_OVERFLOW")
     DATABASE_ECHO: bool = model_config.get("DATABASE_ECHO")
@@ -64,7 +93,7 @@ class Settings(BaseSettings):
         "/api/openapi.json",
         "/api/auth/login",
     ]
-    
+
     # 日志配置
     LOG_FILE_ENABLED: bool = model_config.get("LOG_FILE_ENABLED", True)
     LOG_DB_ENABLED: bool = model_config.get("LOG_DB_ENABLED", True)
@@ -83,8 +112,6 @@ class Settings(BaseSettings):
         elif isinstance(v, (list, str)):
             return v
         raise ValueError(v)
-
-
 
 
 settings = Settings()
