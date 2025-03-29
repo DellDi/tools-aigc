@@ -16,7 +16,7 @@ class Settings(BaseSettings):
     """应用配置设置"""
 
     model_config = SettingsConfigDict(
-        env_file=".env", env_file_encoding="utf-8", case_sensitive=True
+        env_file=".env", env_file_encoding="utf-8", case_sensitive=True, extra="ignore"
     )
     # 应用配置
     APP_NAME: str = model_config.get("APP_NAME")

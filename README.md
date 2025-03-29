@@ -170,6 +170,8 @@ cp .env.example .env
 ```bash
 # 在PostgreSQL中创建数据库
 createdb tools_aigc
+# 或者使用
+CREATE DATABASE tools_aigc;
 ```
 
 6. 应用数据库迁移
@@ -289,10 +291,6 @@ uv run -m alembic upgrade head
 
 # 回滚迁移
 uv run -m alembic downgrade -1
-
-# 使用初始化脚本（自动创建数据库并应用迁移）
-chmod +x scripts/init_db.sh
-./scripts/init_db.sh
 ```
 
 ### Docker 环境
@@ -371,13 +369,13 @@ docker-compose logs -f app
 flowchart TD
     A[修改数据模型] --> B[生成迁移文件]
     B --> C[应用迁移]
-    
+
     subgraph 初始化流程
     D[检查数据库是否存在] -->|否| E[创建数据库]
     E --> F[应用所有迁移]
     D -->|是| F
     end
-    
+
     subgraph 部署流程
     G[Docker Compose启动] --> H[PostgreSQL容器启动]
     H --> I[应用容器启动]
