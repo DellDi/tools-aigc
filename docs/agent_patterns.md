@@ -11,17 +11,17 @@ graph TD
     A[智能体类型] --> B[基础智能体/Function Call模式]
     A --> C[标准智能体/ReAct模式]
     A --> D[高级智能体/自主规划模式]
-    
+
     B --> B1[单次调用型]
     B --> B2[无循环决策]
-    
+
     C --> C1[多轮思考]
     C --> C2[有限迭代循环]
-    
+
     D --> D1[自主规划能力]
     D --> D2[任务分解能力]
     D --> D3[自我修正机制]
-    
+
     style B fill:#bbf,stroke:#333,stroke-width:2px
     style C fill:#f9f,stroke:#333,stroke-width:2px
     style D fill:#bfb,stroke:#333,stroke-width:2px
@@ -45,7 +45,7 @@ sequenceDiagram
     participant User as 用户
     participant LLM as 大语言模型
     participant Tools as 工具系统
-    
+
     User->>LLM: 输入请求
     LLM->>LLM: 分析需要的工具
     LLM->>Tools: 一次性调用所需工具
@@ -70,9 +70,9 @@ sequenceDiagram
     participant User as 用户
     participant LLM as 大语言模型
     participant Tools as 工具系统
-    
+
     User->>LLM: 输入请求
-    
+
     loop 思考-行动-观察循环(迭代次数可配置)
         LLM->>LLM: 思考下一步行动
         LLM->>Tools: 执行工具调用
@@ -113,7 +113,7 @@ graph TD
     C --> D[批量执行工具调用]
     D --> E[结果合并]
     E --> F[返回最终响应]
-    
+
     style C fill:#bbf,stroke:#333,stroke-width:2px
     style D fill:#bbf,stroke:#333,stroke-width:2px
 ```
@@ -124,15 +124,15 @@ graph TD
 graph TD
     A[用户请求] --> B[模型思考]
     B --> C[决策:是否调用工具]
-    
+
     C -->|是| D[确定工具和参数]
     D --> E[执行单个工具]
     E --> F[观察结果]
     F --> G[继续思考]
     G --> C
-    
+
     C -->|否,达到迭代上限或任务完成| H[生成最终响应]
-    
+
     style B fill:#f9f,stroke:#333,stroke-width:2px
     style C fill:#f9f,stroke:#333,stroke-width:2px
     style G fill:#f9f,stroke:#333,stroke-width:2px
@@ -183,20 +183,20 @@ def process_with_react(query, max_iterations=5):
         # 思考阶段
         current_thought = llm.generate_thought(query, thoughts, previous_actions)
         thoughts.append(current_thought)
-        
+
         # 行动阶段
         action = decide_action(current_thought)
         if action.type == "tool_call":
             result = execute_tool(action.tool, action.params)
-        
+
         # 观察阶段
         observation = format_result(result)
         thoughts.append(f"观察到: {observation}")
-        
+
         # 判断是否完成
         if should_finish(thoughts):
             break
-    
+
     return generate_final_response(thoughts)
 ```
 

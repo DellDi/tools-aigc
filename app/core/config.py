@@ -48,11 +48,13 @@ class Settings(BaseSettings):
 
     # LLM模型配置
     # API Key映射，将请求中的API Key映射到对应的服务提供商
-    LLM_API_KEYS: dict = {
-        "sk-qwen": model_config.get("QWEN_API_KEY", ""),  # 通义千问
-        "sk-deepseek": model_config.get("DEEPSEEK_API_KEY", ""),  # DeepSeek
-        "default": model_config.get("QWEN_API_KEY", ""),  # 默认API Key
-    }
+    @property
+    def LLM_API_KEYS(self) -> dict:
+        return {
+            "sk-qwen": self.QWEN_API_KEY or "",  # 通义千问
+            "sk-deepseek": self.DEEPSEEK_API_KEY or "",  # DeepSeek
+            "default": self.QWEN_API_KEY or "",  # 默认API Key
+        }
 
     # 模型名称映射，将OpenAI风格的模型名称映射到实际的模型标识符
     LLM_MODEL_MAPPING: dict = {

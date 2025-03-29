@@ -9,7 +9,7 @@ import httpx
 from app.tools.base import BaseTool, ToolRegistry, ToolResult
 from app.core.config import settings
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("uvicorn")
 
 class WeatherTool(BaseTool):
     """天气查询工具 - 使用 OpenWeatherMap One Call API 3.0"""
@@ -49,7 +49,7 @@ class WeatherTool(BaseTool):
                 success=False,
                 error="未配置 OpenWeatherMap API 密钥"
             )
-
+        logger.info(f"使用 API 密钥: {api_key[:5]}...")
         try:
             # 步骤 1: 使用 Geocoding API 获取城市的经纬度
             geo_url = "https://api.openweathermap.org/geo/1.0/direct"
@@ -58,23 +58,23 @@ class WeatherTool(BaseTool):
                 "limit": 1,
                 "appid": api_key
             }
-            
+
             async with httpx.AsyncClient() as client:
                 geo_response = await client.get(geo_url, params=geo_params)
                 geo_response.raise_for_status()
                 geo_data = geo_response.json()
-                
+
                 if not geo_data:
                     return ToolResult(
                         success=False,
                         error=f"找不到城市: {city}, {country}"
                     )
-                
+
                 # 获取第一个匹配结果的经纬度
                 lat = geo_data[0]["lat"]
                 lon = geo_data[0]["lon"]
                 location_name = geo_data[0].get("local_names", {}).get("zh", geo_data[0]["name"])
-                
+
                 # 步骤 2: 使用 One Call API 3.0 获取天气数据
                 weather_url = "https://api.openweathermap.org/data/3.0/onecall"
                 weather_params = {
@@ -83,15 +83,15 @@ class WeatherTool(BaseTool):
                     "units": units,
                     "appid": api_key
                 }
-                
+
                 # 添加可选的 exclude 参数
                 if exclude:
                     weather_params["exclude"] = exclude
-                
+
                 weather_response = await client.get(weather_url, params=weather_params)
                 weather_response.raise_for_status()
                 weather_data = weather_response.json()
-                
+
                 # 处理响应数据
                 result = self._process_weather_data(weather_data, city, country, units, location_name)
                 return ToolResult(
@@ -105,24 +105,24 @@ class WeatherTool(BaseTool):
                 success=False,
                 error=f"天气查询失败: {str(e)}"
             )
-            
+
     def _process_weather_data(self, data: Dict[str, Any], city: str, country: str, units: str, location_name: str) -> Dict[str, Any]:
         """
         处理天气 API 返回的数据
-        
+
         Args:
             data: One Call API 返回的原始数据
             city: 查询的城市名称
             country: 国家代码
             units: 温度单位
             location_name: 地理编码返回的位置名称
-            
+
         Returns:
             Dict[str, Any]: 处理后的天气数据
         """
         # 单位显示文本
         units_text = "摄氏度" if units == "metric" else "华氏度" if units == "imperial" else "开尔文"
-        
+
         # 基本信息
         result = {
             "city": city,
@@ -131,7 +131,7 @@ class WeatherTool(BaseTool):
             "timezone": data["timezone"],
             "units": units_text
         }
-        
+
         # 当前天气
         if "current" in data:
             current = data["current"]
@@ -151,7 +151,7 @@ class WeatherTool(BaseTool):
                     "icon": current["weather"][0]["icon"]
                 }
             }
-        
+
         # 每小时预报（仅包含前 6 小时）
         if "hourly" in data:
             result["hourly"] = []
@@ -164,7 +164,7 @@ class WeatherTool(BaseTool):
                     "weather": hour["weather"][0]["description"],
                     "pop": hour.get("pop", 0) * 100  # 降水概率转为百分比
                 })
-        
+
         # 每日预报（仅包含前 3 天）
         if "daily" in data:
             result["daily"] = []
@@ -182,7 +182,7 @@ class WeatherTool(BaseTool):
                     "weather": day["weather"][0]["description"],
                     "pop": day.get("pop", 0) * 100  # 降水概率转为百分比
                 })
-        
+
         # 天气预警
         if "alerts" in data and data["alerts"]:
             result["alerts"] = []
@@ -193,7 +193,7 @@ class WeatherTool(BaseTool):
                     "start": alert["start"],
                     "end": alert["end"]
                 })
-        
+
         return result
 
 
